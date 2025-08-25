@@ -1,35 +1,61 @@
-const axios = require('axios');
 
-class OllamaService {
+const axios = require('axios');
+// Load environment variables - simplified approach
+require('dotenv').config();
+
+class GroqService {
   constructor() {
-    this.baseURL = 'http://localhost:11434';
-    this.model = 'mistral:latest'; // Using your existing model
+    this.baseURL = 'https://api.groq.com/openai/v1';
+    
+    // Debug environment loading
+    console.log('Current working directory:', process.cwd());
+    console.log('GROQ_API_KEY loaded:', process.env.GROQ_API_KEY ? 'YES' : 'NO');
+    if (process.env.GROQ_API_KEY) {
+      console.log('API Key starts with:', process.env.GROQ_API_KEY.substring(0, 10) + '...');
+    }
+    
+    this.apiKey = process.env.GROQ_API_KEY;
+    this.model = 'openai/gpt-oss-120b'; // Fast model with good performance
+    // Alternative models: 'llama2-70b-4096', 'gemma-7b-it', 'llama3-8b-8192', 'llama3-70b-8192'
   }
 
   async generateChart(prompt, type = 'flowchart') {
     try {
-      console.log(`🤖 Generating ${type} with Mistral...`);
+      console.log(`🤖 Generating ${type} with Groq (${this.model})...`);
       
-      const response = await axios.post(`${this.baseURL}/api/generate`, {
+      if (!this.apiKey) {
+        console.log('Available env vars:', Object.keys(process.env).filter(key => key.includes('GROQ')));
+        console.log('GROQ_API_KEY value:', process.env.GROQ_API_KEY ? '[SET]' : '[NOT SET]');
+        throw new Error('GROQ_API_KEY environment variable is required');
+      }
+
+      const response = await axios.post(`${this.baseURL}/chat/completions`, {
         model: this.model,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.3, // Lower temperature for more consistent output
-          top_p: 0.9
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+       
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
         }
       });
 
       return {
         success: true,
-        content: response.data.response,
-        model: this.model
+        content: response.data.choices[0].message.content,
+        model: this.model,
+        usage: response.data.usage
       };
     } catch (error) {
-      console.error('❌ Ollama error:', error.message);
+      console.error('❌ Groq error:', error.response?.data?.error?.message || error.message);
       return {
         success: false,
-        error: error.message,
+        error: error.response?.data?.error?.message || error.message,
         fallback: this.getFallbackChart(type)
       };
     }
@@ -37,12 +63,47 @@ class OllamaService {
 
   async testConnection() {
     try {
-      const response = await axios.get(`${this.baseURL}/api/tags`);
-      console.log('✅ Ollama connected successfully');
-      return { connected: true, models: response.data.models };
+      if (!this.apiKey) {
+        throw new Error('GROQ_API_KEY environment variable is required');
+      }
+
+      const response = await axios.get(`${this.baseURL}/models`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('✅ Groq connected successfully');
+      return { 
+        connected: true, 
+        models: response.data.data.map(model => model.id),
+        currentModel: this.model
+      };
     } catch (error) {
-      console.error('❌ Cannot connect to Ollama:', error.message);
-      return { connected: false, error: error.message };
+      console.error('❌ Cannot connect to Groq:', error.response?.data?.error?.message || error.message);
+      return { 
+        connected: false, 
+        error: error.response?.data?.error?.message || error.message 
+      };
+    }
+  }
+
+  // Method to change model if needed
+  setModel(modelName) {
+    const availableModels = [
+      'llama-3.3-70b-versatile',
+      'openai/gpt-oss-20b', 
+      'openai/gpt-oss-120b',
+      'llama3-8b-8192',
+      'llama3-70b-8192'
+    ];
+    
+    if (availableModels.includes(modelName)) {
+      this.model = modelName;
+      console.log(`📝 Model changed to: ${modelName}`);
+    } else {
+      console.warn(`⚠️ Model ${modelName} not available. Using default: ${this.model}`);
     }
   }
 
@@ -68,4 +129,4 @@ class OllamaService {
   }
 }
 
-module.exports = new OllamaService();
+module.exports = new GroqService();
