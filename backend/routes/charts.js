@@ -1,20 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const ollamaService = require('../services/ollama');
-const { 
+const {
   // Original prompts
-  flowchartPrompt, 
-  mindmapPrompt, 
-  textMindmapPrompt, 
+  flowchartPrompt,
+  mindmapPrompt,
+  textMindmapPrompt,
   diagramPrompt,
-  
+
   // Enhanced universal prompts
   smartChartPrompt,
   detectInputType,
   universalFlowchartPrompt,
   universalMindmapPrompt,
   universalTimelinePrompt,
-  
+
   // NEW: Specific chart type prompts
   ganttPrompt,
   piePrompt,
@@ -29,16 +29,16 @@ const {
 router.post('/flowchart', async (req, res) => {
   try {
     const { code, language = 'javascript' } = req.body;
-    
+
     if (!code) {
       return res.status(400).json({ error: 'Code is required' });
     }
 
     console.log(`📊 Generating flowchart for ${language} code...`);
-    
+
     const prompt = flowchartPrompt(code, language);
     const result = await ollamaService.generateChart(prompt, 'flowchart');
-    
+
     if (result.success) {
       const mermaidCode = extractMermaidCode(result.content);
       res.json({
@@ -64,38 +64,38 @@ router.post('/flowchart', async (req, res) => {
 router.post('/mindmap', async (req, res) => {
   try {
     const { code, language = 'javascript', prompt, inputType = 'code' } = req.body;
-    
+
     if (!code && !prompt) {
       return res.status(400).json({ error: 'Code or text prompt is required' });
     }
 
     console.log(`🧠 Generating mindmap for ${inputType}...`);
-    console.log('Input data:', { 
-      hasCode: !!code, 
-      hasPrompt: !!prompt, 
+    console.log('Input data:', {
+      hasCode: !!code,
+      hasPrompt: !!prompt,
       inputType,
       codeLength: code ? code.length : 0,
       promptLength: prompt ? prompt.length : 0
     });
-    
-    const aiPrompt = inputType === 'text' 
+
+    const aiPrompt = inputType === 'text'
       ? textMindmapPrompt(prompt)
       : mindmapPrompt(code, language);
-    
+
     console.log('Generated AI prompt:', aiPrompt.substring(0, 200) + '...');
-    
+
     const result = await ollamaService.generateChart(aiPrompt, 'mindmap');
-    
+
     console.log('Ollama service result:', {
       success: result.success,
       hasContent: !!result.content,
       contentLength: result.content ? result.content.length : 0,
       contentPreview: result.content ? result.content.substring(0, 200) + '...' : null
     });
-    
+
     if (result.success) {
       const mermaidCode = extractMindmapCode(result.content);
-      
+
       // Additional validation
       if (!mermaidCode || mermaidCode.length < 10) {
         console.log('⚠️ Generated mindmap code is too short, using enhanced fallback');
@@ -133,11 +133,11 @@ router.post('/mindmap', async (req, res) => {
     }
   } catch (error) {
     console.error('❌ Mindmap generation error:', error);
-    
+
     // Create enhanced fallback on error
     const input = req.body.code || req.body.prompt || 'Error occurred';
     const fallbackCode = createEnhancedMindmapFallback(input, req.body.inputType || 'unknown');
-    
+
     res.json({
       success: true,
       chartType: 'mindmap',
@@ -149,52 +149,40 @@ router.post('/mindmap', async (req, res) => {
   }
 });
 
-// ENHANCED: Universal chart generation endpoint with ALL chart types
+// MODIFIED: Universal chart generation endpoint with auto-detection REMOVED.
 router.post('/universal', async (req, res) => {
   try {
-    const { input, chartType, autoDetect = true } = req.body;
-    
+    // Auto-detection is removed. The user MUST specify the chart type.
+    const { input, chartType } = req.body;
+
     if (!input || input.trim() === '') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Input text is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'Input text is required'
+      });
+    }
+    
+    // The chartType is now mandatory.
+    if (!chartType) {
+      return res.status(400).json({
+        success: false,
+        error: 'A specific chartType is required for generation.'
       });
     }
 
-    console.log('🌟 Universal chart request:', {
+    console.log('🌟 Universal chart request (manual type):', {
       input: input.substring(0, 100) + '...',
-      requestedType: chartType,
-      autoDetect
+      requestedType: chartType
     });
 
-    let selectedChartType = chartType;
-    let detectedType = null;
-
-    // Auto-detect chart type if not specified or if autoDetect is enabled
-    if (!chartType || autoDetect) {
-      detectedType = detectInputType(input);
-
-      // --- MODIFICATION START ---
-      // If the AI auto-detects a timeline, default to a flowchart instead.
-      // This prevents the timeline from being automatically chosen, but allows
-      // the user to still select it manually from the frontend.
-      if (detectedType === 'timeline') {
-        console.log("AI detected 'timeline', defaulting to 'flowchart' for auto-generation.");
-        detectedType = 'flowchart';
-      }
-      // --- MODIFICATION END ---
-
-      if (!chartType) {
-        selectedChartType = detectedType;
-      }
-    }
+    const selectedChartType = chartType;
 
     // Generate appropriate prompt using smart selector
     const prompt = smartChartPrompt(input, selectedChartType);
-    
+
     // Generate chart using existing Ollama service
     const result = await ollamaService.generateChart(prompt, selectedChartType);
-    
+
     if (result.success) {
       // Extract Mermaid code based on chart type
       let mermaidCode;
@@ -250,18 +238,18 @@ router.post('/universal', async (req, res) => {
           mermaidCode = extractMermaidCode(result.content); // Timeline uses flowchart format
           break;
         default:
+          // Fallback to a mindmap if an unknown chart type is provided
           mermaidCode = extractMindmapCode(result.content);
           if (!mermaidCode || mermaidCode.length < 10) {
             mermaidCode = createEnhancedMindmapFallback(input, 'text');
           }
       }
-      
+
       console.log('✅ Universal chart generated successfully:', selectedChartType);
-      
+
       res.json({
         success: true,
         chartType: selectedChartType,
-        detectedType,
         mermaidCode,
         rawResponse: result.content,
         fallback: false
@@ -272,20 +260,19 @@ router.post('/universal', async (req, res) => {
         success: false,
         error: result.error,
         fallback: result.fallback,
-        chartType: selectedChartType,
-        detectedType
+        chartType: selectedChartType
       });
     }
 
   } catch (error) {
     console.error('❌ Universal chart generation error:', error);
-    
+
     // Create emergency fallback
     const fallbackChart = createUniversalFallback(
-      req.body.input || 'Error occurred', 
+      req.body.input || 'Error occurred',
       req.body.chartType || 'mindmap'
     );
-    
+
     res.json({
       success: true,
       mermaidCode: fallbackChart,
@@ -300,17 +287,17 @@ router.post('/universal', async (req, res) => {
 router.post('/suggest-type', async (req, res) => {
   try {
     const { input } = req.body;
-    
+
     if (!input || input.trim() === '') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Input text is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'Input text is required'
       });
     }
 
     const detectedType = detectInputType(input);
     const suggestions = getChartTypeSuggestions(input, detectedType);
-    
+
     res.json({
       success: true,
       detectedType,
@@ -395,19 +382,19 @@ function sanitizeAIOutput(text) {
 async function generateSpecificChart(req, res, chartType, promptFunction, extractFunction) {
   try {
     const { input } = req.body;
-    
+
     if (!input || input.trim() === '') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Input text is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'Input text is required'
       });
     }
 
     console.log(`🎯 Generating ${chartType} chart...`);
-    
+
     const prompt = promptFunction(input);
     const result = await ollamaService.generateChart(prompt, chartType);
-    
+
     if (result.success) {
       const mermaidCode = extractFunction(result.content);
       res.json({
@@ -425,7 +412,7 @@ async function generateSpecificChart(req, res, chartType, promptFunction, extrac
     }
   } catch (error) {
     console.error(`❌ ${chartType} generation error:`, error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Internal server error',
       fallback: createUniversalFallback(req.body.input || 'Error', chartType)
     });
@@ -436,10 +423,10 @@ async function generateSpecificChart(req, res, chartType, promptFunction, extrac
 function extractMermaidCode(response) {
   const sanitizedResponse = sanitizeAIOutput(response);
   console.log('Raw AI response:', sanitizedResponse);
-  
+
   // Extract content between ```mermaid and ``` or find flowchart directly
   let mermaidCode = '';
-  
+
   const mermaidMatch = sanitizedResponse.match(/```mermaid\s*([\s\S]*?)\s*```/);
   if (mermaidMatch) {
     mermaidCode = mermaidMatch[1];
@@ -449,14 +436,14 @@ function extractMermaidCode(response) {
       mermaidCode = flowchartMatch[0];
     }
   }
-  
+
   if (mermaidCode) {
     // Use robust parsing to completely reconstruct the flowchart
     let cleanedCode = reconstructMermaidFlowchart(mermaidCode);
     console.log('Reconstructed Mermaid code:', cleanedCode);
     return cleanedCode;
   }
-  
+
   // Fallback with proper formatting
   return `flowchart TD
     A([Start])
@@ -471,50 +458,50 @@ function reconstructMermaidFlowchart(rawCode) {
   // Extract all nodes and connections using regex patterns
   let nodes = new Map();
   let connections = [];
-  
+
   // Find node definitions: A([Start]), B[Process], C{Decision?}, etc.
   const nodeRegex = /([A-Z]\d*)\s*(\([^)]*\)|\[[^\]]*\]|\{[^}]*\})/g;
   let match;
-  
+
   while ((match = nodeRegex.exec(rawCode)) !== null) {
     const nodeId = match[1];
     const nodeContent = match[2];
     nodes.set(nodeId, nodeContent);
   }
-  
+
   // If no nodes found, extract from connection patterns
   if (nodes.size === 0) {
     // Look for patterns like "A([Start]) --> B[Process]"
     const connectionRegex = /([A-Z]\d*)\s*(\([^)]*\)|\[[^\]]*\]|\{[^}]*\})\s*-->\s*(?:\|[^|]*\|\s*)?([A-Z]\d*)\s*(\([^)]*\)|\[[^\]]*\]|\{[^}]*\})?/g;
-    
+
     while ((match = connectionRegex.exec(rawCode)) !== null) {
       const fromId = match[1];
       const fromContent = match[2];
       const toId = match[3];
       const toContent = match[4];
-      
+
       nodes.set(fromId, fromContent);
       if (toContent) {
         nodes.set(toId, toContent);
       }
     }
   }
-  
+
   // Find connections: A --> B, C -->|Yes| D, etc.
   const connectionRegex = /([A-Z]\d*)\s*-->\s*(?:\|([^|]*)\|\s*)?([A-Z]\d*)/g;
-  
+
   while ((match = connectionRegex.exec(rawCode)) !== null) {
     const from = match[1];
     const label = match[2];
     const to = match[3];
-    
+
     connections.push({
       from,
       to,
       label: label || null
     });
   }
-  
+
   // If we still don't have enough info, create a simple structure
   if (nodes.size === 0 || connections.length === 0) {
     return `flowchart TD
@@ -525,15 +512,15 @@ function reconstructMermaidFlowchart(rawCode) {
     C -->|No| E([End])
     D --> E`;
   }
-  
+
   // Reconstruct the flowchart
   let result = ['flowchart TD'];
-  
+
   // Add node definitions (optional but helps with clarity)
   for (let [nodeId, nodeContent] of nodes) {
     result.push(`    ${nodeId}${nodeContent}`);
   }
-  
+
   // Add connections
   for (let conn of connections) {
     if (conn.label) {
@@ -542,7 +529,7 @@ function reconstructMermaidFlowchart(rawCode) {
       result.push(`    ${conn.from} --> ${conn.to}`);
     }
   }
-  
+
   return result.join('\n');
 }
 
@@ -551,15 +538,15 @@ function extractMindmapCode(response) {
   const sanitizedResponse = sanitizeAIOutput(response);
   console.log('=== MINDMAP EXTRACTION DEBUG START ===');
   console.log('Raw response preview:', sanitizedResponse ? sanitizedResponse.substring(0, 300) + '...' : 'no content');
-  
+
   if (!sanitizedResponse || typeof sanitizedResponse !== 'string' || sanitizedResponse.trim() === '') {
     console.log('❌ Invalid response, using fallback');
     console.log('=== MINDMAP EXTRACTION DEBUG END ===');
     return createBasicMindmapFallback();
   }
-  
+
   let mermaidCode = '';
-  
+
   // Strategy 1: Extract content between ```mermaid and ```
   const mermaidMatch = sanitizedResponse.match(/```mermaid\s*([\s\S]*?)\s*```/i);
   if (mermaidMatch && mermaidMatch[1]) {
@@ -571,7 +558,7 @@ function extractMindmapCode(response) {
       mermaidCode = mindmapMatch[0].trim();
     }
   }
-  
+
   if (mermaidCode && mermaidCode.trim() !== '') {
     // Clean and validate the mindmap code
     const cleanedCode = cleanMindmapCode(mermaidCode);
@@ -579,10 +566,10 @@ function extractMindmapCode(response) {
     console.log('=== MINDMAP EXTRACTION DEBUG END ===');
     return cleanedCode;
   }
-  
+
   console.log('❌ No valid mindmap found, using fallback');
   console.log('=== MINDMAP EXTRACTION DEBUG END ===');
-  
+
   return createBasicMindmapFallback();
 }
 
@@ -590,81 +577,114 @@ function cleanMindmapCode(code) {
   if (!code || typeof code !== 'string') {
     return createBasicMindmapFallback();
   }
-  
+
   // Remove extra whitespace and normalize line endings
   let cleaned = code.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  
+
   // Split into lines and process
   let lines = cleaned.split('\n').map(line => line.trim()).filter(line => line !== '');
-  
+
   if (lines.length === 0) {
     return createBasicMindmapFallback();
   }
-  
+
   // Ensure it starts with 'mindmap'
   if (!lines[0].toLowerCase().includes('mindmap')) {
     lines.unshift('mindmap');
   }
-  
+
   return lines.join('\n');
 }
 
+// MODIFIED: Greatly expanded basic fallback mindmap
 function createBasicMindmapFallback() {
   return `mindmap
-  root((Topic))
-    Branch 1
-      Sub-topic 1
-      Sub-topic 2
-    Branch 2
-      Sub-topic 3`;
+  root((Central Topic))
+    Main Branch A
+      Sub-topic A.1
+        Detail A.1.1
+        Detail A.1.2
+      Sub-topic A.2
+    Main Branch B
+      Sub-topic B.1
+      Sub-topic B.2
+        Detail B.2.1
+    Main Branch C
+      Sub-topic C.1`;
 }
 
+// MODIFIED: Greatly expanded enhanced fallback mindmaps
 function createEnhancedMindmapFallback(input, inputType) {
-  const shortInput = input && input.length > 30 ? input.substring(0, 27) + '...' : (input || 'Content');
+  const shortInput = input && input.length > 40 ? input.substring(0, 37) + '...' : (input || 'Content');
   const cleanInput = shortInput.replace(/[(){}[\]]/g, '').trim();
-  
+
   if (inputType === 'code') {
     return `mindmap
-  root((${cleanInput}))
-    Functions
-      Main Functions
-      Helper Functions
-    Variables
-      Global Variables
-      Local Variables
-    Structure
-      Classes/Objects
-      Dependencies`;
+  root((${cleanInput}))
+    Code Structure
+      Entry Point
+        (main function)
+      Core Modules
+        Module A
+        Module B
+      Helper Utilities
+        (utility functions)
+    Key Logic
+      Primary Algorithm
+      Business Rules
+      State Management
+        (variables & state)
+    Data Flow
+      Input Sources
+      Data Processing
+      Output / Results
+    Dependencies
+      External Libraries
+      Internal Components`;
   } else {
     return `mindmap
-  root((${cleanInput}))
-    Analysis
-      Key Points
-      Important Aspects
-    Next Steps
-      Action Items
-      Follow-up`;
+  root((${cleanInput}))
+    Core Idea
+      Main Thesis
+      Key Concepts
+        Concept X
+        Concept Y
+    Supporting Points
+      Argument 1
+        Evidence 1a
+        Evidence 1b
+      Argument 2
+        Evidence 2a
+    Potential Questions
+      (Areas for clarification)
+      (Possible objections)
+    Action Items
+      Follow-up Research
+      Next Steps
+        Task 1
+        Task 2`;
   }
 }
 
+
 function categorizeWords(words) {
-  const actions = words.filter(word => 
+  const actions = words.filter(word =>
     /^(get|set|create|update|delete|add|remove|process|handle)/.test(word)
   ).slice(0, 3);
-  
-  const concepts = words.filter(word => 
-    word.length > 4 && 
-    !actions.includes(word) && 
+
+  const concepts = words.filter(word =>
+    word.length > 4 &&
+    !actions.includes(word) &&
     !/^(the|and|for|with|from|that|this)/.test(word)
   ).slice(0, 4);
-  
-  const objects = words.filter(word => 
-    word.length > 3 && 
-    !actions.includes(word) && 
+
+  const objects = words.filter(word =>
+    word.length > 3 &&
+    !actions.includes(word) &&
     !concepts.includes(word) &&
     !/^(is|are|was|were|has|have|had)/.test(word)
   ).slice(0, 3);
-  
+
   return { actions, concepts, objects };
 }
 
@@ -714,7 +734,7 @@ function extractClassCode(response) {
 // ENHANCED: Helper functions for universal charts
 function createUniversalFallback(input, chartType) {
   const shortInput = input.length > 50 ? input.substring(0, 47) + '...' : input;
-  
+
   switch (chartType) {
     case 'gantt':
     case 'project':
